@@ -2,7 +2,9 @@
 #include "SDL/SDL_image.h"
 #include "SDL/SDL_ttf.h"
 #include <iostream>
+#include <sstream>
 #include <string>
+#include "timer.h"
 
 using namespace std;
 
@@ -16,8 +18,8 @@ const int LEVEL_WIDTH = 3840;
 const int LEVEL_HEIGHT = 2160;
 
 //The atributes of block
-const int BLOCK_SIZE = 80;
-SDL_Rect block = {640, 480, BLOCK_SIZE, BLOCK_SIZE};
+const int BLOCK_SIZE = 160;
+SDL_Rect block = {SCREEN_WIDTH/2, SCREEN_HEIGHT, BLOCK_SIZE, BLOCK_SIZE};
 
 //The artibutes of drone
 const int DRONE_SIZE = 128;
@@ -27,6 +29,7 @@ SDL_Surface* screen = NULL;
 SDL_Surface* background = NULL;
 SDL_Surface* drone = NULL;
 SDL_Surface* info = NULL;
+SDL_Surface* eva = NULL;
 
 //Camera
 SDL_Rect camera = {0, 0, SCREEN_WIDTH, SCREEN_HEIGHT };
@@ -47,6 +50,7 @@ class Drone
 {
     private:
         SDL_Rect box;     //Box for our drone
+        float x, y;
         float Vx, Vy;     //velocities
         float ax, ay;     //forses;
 
@@ -60,27 +64,6 @@ class Drone
         void show();
         //set camera in right position
         void set_camera();
-};
-
-class Timer
-{
-    private:
-        int startTicks;         //clock time when started
-        int pausedTicks;        //clock time when paused
-        bool started;           //is started/paused?
-        bool paused;
-    public:
-        Timer();
-        //clock actions
-        void start();
-        void stop();
-        void pause();
-        void unpause();
-        //Get time
-        int get_Ticks();
-        //Status?
-        bool is_started();
-        bool is_paused();
 };
 
 //Load images from file. Improve them in some way (I do not know), and delete colorkey
@@ -159,6 +142,8 @@ bool load_files()
     background = load_image("field.png");
     //drone =/
     drone = load_image("drone.png");
+    //block
+    eva = load_image("block.png");
     //Font
     font = TTF_OpenFont("font.ttf", 36);
 
@@ -179,6 +164,7 @@ void close()
     SDL_FreeSurface(background);
     SDL_FreeSurface( drone );
     SDL_FreeSurface( info );
+    SDL_FreeSurface( eva );
 
     //Close font
     TTF_CloseFont( font );
@@ -195,6 +181,8 @@ Drone::Drone()
     box.w = DRONE_SIZE;
     box.h = DRONE_SIZE;
 
+    x = box.x;
+    y = box.y;
     Vx = 0;
     Vy = 0;
     ax = 0;
@@ -236,42 +224,93 @@ void Drone::move(int dt)
     Vx += 10 * ax * (dt/1000.f);
     Vy += 10 * ay * (dt/1000.f);
 
-    box.x += Vx* (dt/1000.f);
-    box.y += Vy* (dt/1000.f);
+    bool A, B;
+    SDL_Rect temp;
+    temp.h = box.h;
+    temp.w = box.w;
+
+    x += Vx* (dt/1000.f);
+    y += Vy* (dt/1000.f);
+
+    box.x = x;
+    box.y = y;
 
     if( (box.x < 0) || ( box.x > LEVEL_WIDTH ) )
     {
-        box.x -= Vx* (dt/1000.f);
+        x -= Vx* (dt/1000.f);
         Vx = 0;
     }
 
     if( (box.y < 0) || ( box.y > LEVEL_HEIGHT ) )
     {
-        box.y -= Vy* (dt/1000.f);
+        y -= Vy* (dt/1000.f);
         Vy = 0;
     }
 
-    if (check_collision(box, block))
+    if(check_collision(box, block))
     {
-        box.x -= Vx* (dt/1000.f);
-        box.y -= Vy* (dt/1000.f);
-        Vx = 0;
-        Vy = 0;
+        temp.x = x;
+        temp.y = y - Vy* (dt/1000.f);
+        A = check_collision(temp, block);
+
+        temp.x = x - Vx* (dt/1000.f);
+        temp.y = y;
+        B = check_collision(temp, block);
+
+        if(A == false && B == true)
+        {
+            x -= Vx* (dt/1000.f);
+            Vx = -Vx;
+        }
+        else if(A == true && B == false)
+        {
+            y -= Vy* (dt/1000.f);
+            Vy = -Vy;
+        }
+        else if(A == false && B == false)
+        {
+            if(Vx < Vy)
+            {
+                x -= Vx* (dt/1000.f);
+                Vx = -Vx;
+            }
+            else
+            {
+                y -= Vy* (dt/1000.f);
+                Vy = -Vy;
+            }
+        }
+        else
+        {
+            x -= Vx* (dt/1000.f);
+            Vx = -Vx;
+            y -= Vy* (dt/1000.f);
+            Vy = -Vy;
+        }
     }
+
+    box.x = x;
+    box.y = y;
 }
 
 void Drone::show()
 {
+    //apply_surface(box.x - camera.x, box.y - camera.y, drone, screen );
     apply_surface(box.x - camera.x, box.y - camera.y, drone, screen );
-    if(!presssed)
-    {
-        apply_surface(0,0, info, screen );
-    }
+
+    //create strings
+    stringstream coord1, coord2;
+    coord1 << "X: " << box.x;
+    coord2 << "Y: " << box.y;
+    //create text
+    info = TTF_RenderText_Solid( font, coord1.str().c_str(), textColor );
+    apply_surface(0,0, info, screen );
+    info = TTF_RenderText_Solid( font, coord2.str().c_str(), textColor );
+    apply_surface(0,32, info, screen );
 }
 
 void Drone::set_camera()
 {
-    //center camera
     camera.x = box.x - SCREEN_WIDTH/2;
     camera.y = box.y - SCREEN_HEIGHT/2;
 
@@ -293,78 +332,6 @@ void Drone::set_camera()
     {
         camera.y = LEVEL_HEIGHT - camera.h;
     }
-}
-
-Timer::Timer()
-{
-    startTicks = 0;
-    pausedTicks = 0;
-    paused = false;
-    started = false;
-}
-
-void Timer::start()
-{
-    started = true;
-    paused = false;
-
-    startTicks = SDL_GetTicks();
-}
-
-void Timer::stop()
-{
-    started = false;
-    paused = false;
-}
-
-void Timer::pause()
-{
-    if( started == true && paused == false )
-    {
-        paused = true;
-
-        pausedTicks = SDL_GetTicks() - startTicks;
-    }
-}
-
-void Timer::unpause()
-{
-    if( paused == true )
-    {
-        paused = false;
-
-        startTicks = SDL_GetTicks() - pausedTicks;
-
-        pausedTicks = 0;
-    }
-}
-
-int Timer::get_Ticks()
-{
-    if( started == true )
-    {
-        if( paused == true )
-        {
-            return pausedTicks;
-        }
-        else
-        {
-            return SDL_GetTicks() - startTicks;
-        }
-    }
-    else
-    {
-        return 0;
-    }
-}
-
-bool Timer::is_started()
-{
-    return started;
-}
-bool Timer::is_paused()
-{
-    return paused;
 }
 
 bool check_collision(SDL_Rect &A, SDL_Rect &B)
@@ -395,7 +362,6 @@ bool check_collision(SDL_Rect &A, SDL_Rect &B)
     }
 }
 
-
 int main(int argc, char* args[])
 {
 	//main loop flag
@@ -414,9 +380,6 @@ int main(int argc, char* args[])
     {
         return 1;
     }
-
-    //create text
-    info = TTF_RenderText_Solid( font, "Inertion", textColor );
 
     //start timer first time
     delta.start();
@@ -450,7 +413,8 @@ int main(int argc, char* args[])
         apply_surface(0,0,background,screen,&camera);
 
         //Show block
-        SDL_FillRect(screen, &block, SDL_MapRGB(screen->format, 0x77, 0x77, 0x77));
+        //SDL_FillRect(background, &block, SDL_MapRGB(screen->format, 0, 0, 0));
+        SDL_BlitSurface ( eva, NULL, background, &block );
 
         myDrone.show();
 
